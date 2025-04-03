@@ -44,7 +44,7 @@ func SetupJaeger(t *Tracer, tracerName string, c *Config) (trace.Tracer, error) 
 				jaegerPath = "/api/traces"
 			}
 			if port == "4318" {
-				jaegerPath = "/v1/tracing"
+				jaegerPath = "/v1/traces"
 			}
 		}
 	}
