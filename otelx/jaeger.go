@@ -34,17 +34,23 @@ func SetupJaeger(t *Tracer, tracerName string, c *Config) (trace.Tracer, error) 
 	host, port, err := net.SplitHostPort(c.Providers.Jaeger.LocalAgentAddress)
 	if err != nil {
 		jaegerScheme = c.Providers.Jaeger.CollectorScheme
-		if jaegerScheme == "http" {
-			jaegerPath = "/api/traces"
-		}
 		var nerr error
 		if host, port, nerr = net.SplitHostPort(c.Providers.Jaeger.CollectorAddress); nerr != nil {
 			return nil, err
 		}
+		if jaegerScheme == "http" {
+			jaegerPath = "/api/traces"
+			if port == "14268" {
+				jaegerPath = "/api/traces"
+			}
+			if port == "4318" {
+				jaegerPath = "/v1/tracing"
+			}
+		}
 	}
 
 	var endpointOption jaeger.EndpointOption
-	if jaegerScheme == "http" || jaegerScheme == "grpc" {
+	if jaegerScheme == "http" || jaegerScheme == "https" || jaegerScheme == "grpc" {
 		endpointOption = jaeger.WithCollectorEndpoint(
 			jaeger.WithEndpoint(fmt.Sprintf("%s://%s:%s%s", jaegerScheme, host, port, jaegerPath)),
 		)
