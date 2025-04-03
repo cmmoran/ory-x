@@ -45,10 +45,10 @@
           "description": "Configures the jaeger tracing backend.",
           "properties": {
             "collector_scheme": {
-              "enum": ["http", "grpc"],
+              "enum": ["http", "https", "grpc"],
               "type": "string",
               "default": "http",
-              "description": "The scheme to use for sending jaeger-collector spans; http is port 14268, grpc is 14250 by default"
+              "description": "The scheme to use for sending jaeger-collector spans; http(s) is port 14268, grpc is 14250 by default"
             },
             "collector_address": {
               "type": "string",
