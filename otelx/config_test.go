@@ -30,28 +30,51 @@ func TestConfigSchema(t *testing.T) {
 		c := jsonschema.NewCompiler()
 		require.NoError(t, AddConfigSchema(c))
 
-		conf := Config{
-			ServiceName: "Ory X",
-			Provider:    "jaeger",
-			Providers: ProvidersConfig{
-				Jaeger: JaegerConfig{
-					LocalAgentAddress: "localhost:6831",
-					Sampling: JaegerSampling{
-						ServerURL:    "http://localhost:5778/sampling",
-						TraceIdRatio: 1,
+		testCases := map[string]Config{
+			"jaeger with local agent": {
+				ServiceName: "Ory X",
+				Provider:    "jaeger",
+				Providers: ProvidersConfig{
+					Jaeger: JaegerConfig{
+						LocalAgentAddress: "localhost:6831",
+						Sampling: JaegerSampling{
+							ServerURL:    "http://localhost:5778/sampling",
+							TraceIdRatio: 1,
+						},
 					},
 				},
 			},
+			"jaeger with collector": {
+				ServiceName: "Ory X",
+				Provider:    "jaeger",
+				Providers: ProvidersConfig{
+					Jaeger: JaegerConfig{
+						CollectorScheme:  "http",
+						CollectorAddress: "localhost:14268",
+						Sampling: JaegerSampling{
+							ServerURL:    "http://localhost:5778/sampling",
+							TraceIdRatio: 1,
+						},
+					},
+				},
+			},
+			"no providers": {
+				ServiceName: "Ory X",
+				Provider:    "noop",
+			},
 		}
 
-		rawConfig, err := sjson.Set("{}", "otelx", &conf)
-		require.NoError(t, err)
+		for name, conf := range testCases {
+			t.Run(name, func(t *testing.T) {
+				rawConfig, err := sjson.Set("{}", "otelx", &conf)
+				require.NoError(t, err)
 
-		require.NoError(t, c.AddResource("config", bytes.NewBufferString(fmt.Sprintf(rootSchema, ConfigSchemaID))))
+				require.NoError(t, c.AddResource("config", bytes.NewBufferString(fmt.Sprintf(rootSchema, ConfigSchemaID))))
+				schema, err := c.Compile(context.Background(), "config")
+				require.NoError(t, err)
 
-		schema, err := c.Compile(context.Background(), "config")
-		require.NoError(t, err)
-
-		assert.NoError(t, schema.Validate(bytes.NewBufferString(rawConfig)))
+				assert.NoError(t, schema.Validate(bytes.NewBufferString(rawConfig)))
+			})
+		}
 	})
 }
