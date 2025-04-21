@@ -28,29 +28,22 @@
         "jaeger": {
           "type": "object",
           "additionalProperties": false,
-          "allOf": [
+          "oneOf": [
             {
-              "if": { "required": ["local_agent_address"] },
-              "then": {
-                "not": {
-                  "anyOf": [
-                    { "required": ["collector_scheme"] },
-                    { "required": ["collector_address"] }
-                  ]
-                }
+              "not": {
+                "anyOf": [
+                  { "required": ["local_agent_address"] },
+                  { "required": ["collector_scheme", "collector_address"] }
+                ]
               }
             },
             {
-              "if": {
-                "anyOf": [
-                  { "required": ["collector_scheme"] },
-                  { "required": ["collector_address"] }
-                ]
-              },
-              "then": {
-                "required": ["collector_scheme","collector_address"],
-                "not": { "required": ["local_agent_address"] }
-              }
+              "required": ["local_agent_address"],
+              "not": { "required": ["collector_scheme", "collector_address"] }
+            },
+            {
+              "required": ["collector_scheme", "collector_address"],
+              "not": { "required": ["local_agent_address"] }
             }
           ],
           "description": "Configures the jaeger tracing backend.",
