@@ -5,10 +5,13 @@ package logrusx
 
 import (
 	"bytes"
+	"cmp"
 	_ "embed"
 	"io"
 	"net/http"
 	"os"
+	"strings"
+	"testing"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -20,22 +23,24 @@ import (
 
 type (
 	options struct {
-		l             *logrus.Logger
-		level         *logrus.Level
-		formatter     logrus.Formatter
-		format        string
-		reportCaller  bool
-		exitFunc      func(int)
-		leakSensitive bool
-		redactionText string
-		hooks         []logrus.Hook
-		c             configurator
+		l                         *logrus.Logger
+		level                     *logrus.Level
+		formatter                 logrus.Formatter
+		format                    string
+		reportCaller              bool
+		exitFunc                  func(int)
+		leakSensitive             bool
+		redactionText             string
+		additionalRedactedHeaders []string
+		hooks                     []logrus.Hook
+		c                         configurator
 	}
 	Option           func(*options)
 	nullConfigurator struct{}
 	configurator     interface {
 		Bool(key string) bool
 		String(key string) string
+		Strings(path string) []string
 	}
 )
 
@@ -48,7 +53,8 @@ const ConfigSchemaID = "ory://logging-config"
 // The interface is specified instead of `jsonschema.Compiler` to allow the use of any jsonschema library fork or version.
 func AddConfigSchema(c interface {
 	AddResource(url string, r io.Reader) error
-}) error {
+},
+) error {
 	return c.AddResource(ConfigSchemaID, bytes.NewBufferString(ConfigSchema))
 }
 
@@ -78,7 +84,7 @@ func setLevel(l *logrus.Logger, o *options) {
 		l.Level = *o.level
 	} else {
 		var err error
-		l.Level, err = logrus.ParseLevel(stringsx.Coalesce(
+		l.Level, err = logrus.ParseLevel(cmp.Or(
 			o.c.String("log.level"),
 			os.Getenv("LOG_LEVEL")))
 		if err != nil {
@@ -93,7 +99,7 @@ func setFormatter(l *logrus.Logger, o *options) {
 	} else {
 		var unknownFormat bool // we first have to set the formatter before we can complain about the unknown format
 
-		format := stringsx.SwitchExact(stringsx.Coalesce(o.format, o.c.String("log.format"), os.Getenv("LOG_FORMAT")))
+		format := stringsx.SwitchExact(cmp.Or(o.format, o.c.String("log.format"), os.Getenv("LOG_FORMAT")))
 		switch {
 		case format.AddCase("json"):
 			l.Formatter = &logrus.JSONFormatter{PrettyPrint: false, TimestampFormat: time.RFC3339Nano, DisableHTMLEscape: true}
@@ -178,12 +184,30 @@ func RedactionText(text string) Option {
 	}
 }
 
+func WithAdditionalRedactedHeaders(headers []string) Option {
+	return func(o *options) {
+		o.additionalRedactedHeaders = headers
+	}
+}
+
+func toHeaderMap(headers []string) map[string]struct{} {
+	m := make(map[string]struct{}, len(headers))
+	for _, h := range headers {
+		m[strings.ToLower(h)] = struct{}{}
+	}
+	return m
+}
+
 func (c *nullConfigurator) Bool(_ string) bool {
 	return false
 }
 
 func (c *nullConfigurator) String(_ string) string {
 	return ""
+}
+
+func (c *nullConfigurator) Strings(_ string) []string {
+	return []string{}
 }
 
 func newOptions(opts []Option) *options {
@@ -203,10 +227,38 @@ func New(name string, version string, opts ...Option) *Logger {
 		name:          name,
 		version:       version,
 		leakSensitive: o.leakSensitive || o.c.Bool("log.leak_sensitive_values"),
-		redactionText: stringsx.Coalesce(o.redactionText, `Value is sensitive and has been redacted. To see the value set config key "log.leak_sensitive_values = true" or environment variable "LOG_LEAK_SENSITIVE_VALUES=true".`),
+		redactionText: cmp.Or(o.redactionText, `Value is sensitive and has been redacted. To see the value set config key "log.leak_sensitive_values = true" or environment variable "LOG_LEAK_SENSITIVE_VALUES=true".`),
+		additionalRedactedHeaders: toHeaderMap(func() []string {
+			if len(o.additionalRedactedHeaders) > 0 {
+				return o.additionalRedactedHeaders
+			}
+			return o.c.Strings("log.additional_redacted_headers")
+		}()),
 		Entry: newLogger(o.l, o).WithFields(logrus.Fields{
-			"audience": "application", "service_name": name, "service_version": version}),
+			"audience": "application", "service_name": name, "service_version": version,
+		}),
 	}
+}
+
+func NewT(t testing.TB, opts ...Option) *Logger {
+	opts = append(opts, LeakSensitive(), WithExitFunc(func(code int) {
+		t.Fatalf("Logger exited with code %d", code)
+	}))
+	l := New(t.Name(), "test", opts...)
+	l.Logger.Out = &testOutput{t}
+	return l
+}
+
+type testOutput struct {
+	t testing.TB
+}
+
+func (t *testOutput) Write(p []byte) (n int, err error) {
+	if t.t == nil {
+		return os.Stdout.Write(p)
+	}
+	t.t.Log(t.t.Name() + " " + string(p))
+	return len(p), nil
 }
 
 func NewAudit(name string, version string, opts ...Option) *Logger {
@@ -215,7 +267,11 @@ func NewAudit(name string, version string, opts ...Option) *Logger {
 
 func (l *Logger) UseConfig(c configurator) {
 	l.leakSensitive = l.leakSensitive || c.Bool("log.leak_sensitive_values")
-	l.redactionText = stringsx.Coalesce(c.String("log.redaction_text"), l.redactionText)
+	l.redactionText = cmp.Or(c.String("log.redaction_text"), l.redactionText)
+	newHeaders := toHeaderMap(c.Strings("log.additional_redacted_headers"))
+	for k := range newHeaders {
+		l.additionalRedactedHeaders[k] = struct{}{}
+	}
 	o := newOptions(append(l.opts, WithConfigurator(c)))
 	setLevel(l.Entry.Logger, o)
 	setFormatter(l.Entry.Logger, o)

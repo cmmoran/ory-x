@@ -7,15 +7,15 @@ import (
 	"fmt"
 	"regexp"
 
-	"github.com/gobuffalo/pop/v6"
+	"github.com/ory/pop/v6"
 )
 
-var mrx = regexp.MustCompile(
+var MigrationFileRegexp = regexp.MustCompile(
 	`^(\d+)_([^.]+)(\.[a-z0-9]+)?(\.autocommit)?\.(up|down)\.(sql)$`,
 )
 
-// Match holds the information parsed from a migration filename.
-type Match struct {
+// match holds the information parsed from a migration filename.
+type match struct {
 	Version    string
 	Name       string
 	DBType     string
@@ -24,9 +24,9 @@ type Match struct {
 	Autocommit bool
 }
 
-// ParseMigrationFilename parses a migration filename.
-func ParseMigrationFilename(filename string) (*Match, error) {
-	matches := mrx.FindAllStringSubmatch(filename, -1)
+// parseMigrationFilename parses a migration filename.
+func parseMigrationFilename(filename string) (*match, error) {
+	matches := MigrationFileRegexp.FindAllStringSubmatch(filename, -1)
 	if len(matches) == 0 {
 		return nil, nil
 	}
@@ -57,14 +57,12 @@ func ParseMigrationFilename(filename string) (*Match, error) {
 		return nil, fmt.Errorf("invalid autocommit flag %q", m[4])
 	}
 
-	match := &Match{
+	return &match{
 		Version:    m[1],
 		Name:       m[2],
 		DBType:     dbType,
 		Autocommit: autocommit,
 		Direction:  m[5],
 		Type:       m[6],
-	}
-
-	return match, nil
+	}, nil
 }

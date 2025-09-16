@@ -5,10 +5,11 @@ package popx
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/pkg/errors"
 
-	"github.com/gobuffalo/pop/v6"
+	"github.com/ory/pop/v6"
 )
 
 // Migration handles the data for a given database migration
@@ -33,8 +34,6 @@ type Migration struct {
 	RunnerNoTx func(Migration, *pop.Connection) error
 	// Content is the raw content of the migration file
 	Content string
-	// Autocommit is true if the migration should be run outside of a transaction
-	Autocommit bool
 }
 
 func (m Migration) Valid() error {
@@ -50,54 +49,57 @@ func (m Migration) Valid() error {
 // Migrations is a collection of Migration
 type Migrations []Migration
 
-func (mfs Migrations) Len() int {
-	return len(mfs)
-}
+func (mfs Migrations) Len() int           { return len(mfs) }
+func (mfs Migrations) Less(i, j int) bool { return compareMigration(mfs[i], mfs[j]) < 0 }
+func (mfs Migrations) Swap(i, j int)      { mfs[i], mfs[j] = mfs[j], mfs[i] }
 
-func (mfs Migrations) Less(i, j int) bool {
-	if mfs[i].Version == mfs[j].Version {
-		// force "all" to the back
-		return mfs[i].DBType != "all"
+func compareMigration(a, b Migration) int {
+	if a.Version != b.Version {
+		return strings.Compare(a.Version, b.Version)
 	}
-	return mfs[i].Version < mfs[j].Version
+	// Force "all" to be greater.
+	if a.DBType == "all" && b.DBType != "all" {
+		return 1
+	} else if a.DBType != "all" && b.DBType == "all" {
+		return -1
+	}
+	return strings.Compare(a.DBType, b.DBType)
 }
 
-func (mfs Migrations) Swap(i, j int) {
-	mfs[i], mfs[j] = mfs[j], mfs[i]
-}
-
-func (mfs Migrations) SortAndFilter(dialect string, modifiers ...func(sort.Interface) sort.Interface) Migrations {
-	// We need to sort mfs in order to push the dbType=="all" migrations
-	// to the back.
-	m := make(Migrations, len(mfs))
-	copy(m, mfs)
-	sort.Sort(m)
-
-	vsf := make(Migrations, 0, len(m))
-	for k, v := range m {
-		if v.DBType == "all" {
-			// Add "all" only if we can not find a more specific migration for the dialect.
-			var hasSpecific bool
-			for kk, vv := range m {
-				if v.Version == vv.Version && kk != k && vv.DBType == dialect {
-					hasSpecific = true
-					break
-				}
+func (mfs Migrations) sortAndFilter(dialect string) Migrations {
+	usable := make(map[string]Migration, len(mfs))
+	for _, v := range mfs {
+		if v.DBType == dialect {
+			usable[v.Version] = v
+		} else if v.DBType == "all" {
+			// Add "all" only if we do not have a more specific migration for the dialect.
+			// If a more specific migration is found later, it will override this one.
+			if _, ok := usable[v.Version]; !ok {
+				usable[v.Version] = v
 			}
-
-			if !hasSpecific {
-				vsf = append(vsf, v)
-			}
-		} else if v.DBType == dialect {
-			vsf = append(vsf, v)
 		}
 	}
 
-	mod := sort.Interface(vsf)
-	for _, m := range modifiers {
-		mod = m(mod)
+	filtered := make(Migrations, 0, len(usable))
+	for k := range usable {
+		filtered = append(filtered, usable[k])
 	}
+	sort.Sort(filtered)
+	return filtered
+}
 
-	sort.Sort(mod)
-	return vsf
+func (mfs Migrations) find(version, dbType string) *Migration {
+	var candidate *Migration
+	for _, m := range mfs {
+		if m.Version == version {
+			switch m.DBType {
+			case "all":
+				// there might still be a more specific migration for the dbType
+				candidate = &m
+			case dbType:
+				return &m
+			}
+		}
+	}
+	return candidate
 }

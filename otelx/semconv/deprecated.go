@@ -10,11 +10,19 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-func NewDeprecatedFeatureUsedEvent(ctx context.Context, deprecatedCodeFeatureID string) (string, trace.EventOption) {
+// NewDeprecatedFeatureUsedEvent creates a new event indicating that a deprecated feature was used.
+// It returns the event name and a trace.EventOption that can be used to
+// add the event to a span.
+//
+//	span.AddEvent(NewDeprecatedFeatureUsedEvent(ctx, "deprecated-feature-id", otelattr.String("key", "value")))
+func NewDeprecatedFeatureUsedEvent(ctx context.Context, deprecatedCodeFeatureID string, attrs ...otelattr.KeyValue) (string, trace.EventOption) {
 	return DeprecatedFeatureUsed.String(),
 		trace.WithAttributes(
 			append(
-				AttributesFromContext(ctx),
+				append(
+					attrs,
+					AttributesFromContext(ctx)...,
+				),
 				AttrDeprecatedFeatureID(deprecatedCodeFeatureID),
 			)...,
 		)

@@ -1,7 +1,7 @@
 // Copyright © 2023 Ory Corp
 // SPDX-License-Identifier: Apache-2.0
 
-package prometheus
+package prometheusx
 
 import (
 	"net/http"
@@ -40,6 +40,15 @@ type router interface {
 // SetRoutes registers this handler's routes.
 func (h *Handler) SetRoutes(r router) {
 	r.GET(MetricsPrometheusPath, h.Metrics)
+}
+
+type muxrouter interface {
+	GET(path string, handle http.HandlerFunc)
+}
+
+// SetMuxRoutes registers this handler's routes on a ServeMux.
+func (h *Handler) SetMuxRoutes(mux muxrouter) {
+	mux.GET(MetricsPrometheusPath, promhttp.Handler().ServeHTTP)
 }
 
 // Metrics outputs prometheus metrics

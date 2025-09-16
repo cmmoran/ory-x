@@ -7,12 +7,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"reflect"
 	"strings"
 
-	"github.com/gobuffalo/pop/v6/logging"
+	"github.com/ory/pop/v6/logging"
 
 	"github.com/sirupsen/logrus"
 
@@ -23,14 +24,20 @@ import (
 	"github.com/ory/x/errorsx"
 )
 
-type Logger struct {
-	*logrus.Entry
-	leakSensitive bool
-	redactionText string
-	opts          []Option
-	name          string
-	version       string
-}
+type (
+	Logger struct {
+		*logrus.Entry
+		leakSensitive             bool
+		redactionText             string
+		additionalRedactedHeaders map[string]struct{}
+		opts                      []Option
+		name                      string
+		version                   string
+	}
+	Provider interface {
+		Logger() *Logger
+	}
+)
 
 var opts = otelhttptrace.WithPropagators(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
 
@@ -75,6 +82,10 @@ func (l *Logger) HTTPHeadersRedacted(h http.Header) map[string]interface{} {
 				headers[keyLower] = locationURL.Redacted()
 			}
 		default:
+			if _, ok := l.additionalRedactedHeaders[keyLower]; ok {
+				headers[keyLower] = l.maybeRedact(value)
+				continue
+			}
 			headers[keyLower] = h.Get(key)
 		}
 	}
@@ -265,4 +276,18 @@ func (l *Logger) PopLogger(lvl logging.Level, s string, args ...interface{}) {
 	if ok {
 		l.WithField("source", "pop").Logf(level, s, args...)
 	}
+}
+
+func (l *Logger) StdLogger(lvl logrus.Level) *log.Logger {
+	return log.New(writer{l.Logger, lvl}, "", 0)
+}
+
+type writer struct {
+	l   *logrus.Logger
+	lvl logrus.Level
+}
+
+func (w writer) Write(p []byte) (n int, err error) {
+	w.l.Log(w.lvl, strings.TrimSuffix(string(p), "\n"))
+	return len(p), nil
 }
